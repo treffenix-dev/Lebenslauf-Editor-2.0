@@ -7,7 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1a1a1a">
 <title>Anschreiben Editor</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -643,48 +644,74 @@ document.getElementById('doc-frame').addEventListener('input', () => {
   draftTimer = setTimeout(saveDraft, 500); // keep work-in-progress if user leaves
 });
 
-/* ---- Als PDF speichern via html2pdf ----
-   Erzeugt das PDF DIREKT (ohne Browser-Druckdialog). Dadurch gibt es
-   garantiert KEINE Kopf-/Fusszeile, KEINEN URL/GitHub-Link, KEIN Datum,
-   KEINE Seitenzahl. Das Anschreiben passt exakt auf EINE A4-Seite. */
+/* ---- Als PDF speichern via html2canvas + jsPDF ----
+   Erzeugt das PDF DIREKT (ohne Browser-Druckdialog): KEIN URL/GitHub-Link,
+   KEIN Datum, KEINE Seitenzahl. Es wird GENAU das .page-Element in exakter
+   A4-Groesse abfotografiert und als EINE Seite ins PDF gelegt. */
+const A4_HEIGHT_PX = 1122.5; // 297mm @ 96dpi
+
 function saveAsPDF() {
   if (editMode) toggleEdit();
 
   const frame = document.getElementById('doc-frame');
+  // Das eigentliche A4-Blatt finden (eingebaute Vorlage ODER Upload)
+  const sourcePage = frame.querySelector('.page') || frame;
 
-  // saubere Kopie ohne Bearbeiten-Marker und ohne Skalierung
-  const clone = frame.cloneNode(true);
-  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
-  clone.style.transform = 'none';
-  clone.style.width = A4_WIDTH_PX + 'px';
+  // saubere Kopie ohne Bearbeiten-Marker / Skalierung
+  const pageClone = sourcePage.cloneNode(true);
+  pageClone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
 
-  // Off-screen Container in voller A4-Groesse
+  // Exakte A4-Pixelmasse erzwingen, damit genau EINE Seite entsteht
+  pageClone.style.transform = 'none';
+  pageClone.style.margin = '0';
+  pageClone.style.width = A4_WIDTH_PX + 'px';
+  pageClone.style.height = A4_HEIGHT_PX + 'px';
+  pageClone.style.minHeight = A4_HEIGHT_PX + 'px';
+  pageClone.style.maxHeight = A4_HEIGHT_PX + 'px';
+  pageClone.style.boxShadow = 'none';
+  pageClone.style.overflow = 'hidden';
+
+  // Off-screen Container (gleicher CSS-Scope wie Vorschau, damit Styles greifen)
   const holder = document.createElement('div');
   holder.style.position = 'fixed';
   holder.style.left = '-99999px';
   holder.style.top = '0';
   holder.style.width = A4_WIDTH_PX + 'px';
+  holder.style.height = A4_HEIGHT_PX + 'px';
   holder.style.background = '#fff';
-  holder.appendChild(clone);
+  // Scope-Klassen mitgeben (letter-root / doc-upload-scope)
+  const scopeWrap = document.createElement('div');
+  scopeWrap.className = frame.firstElementChild ? frame.firstElementChild.className : '';
+  scopeWrap.appendChild(pageClone);
+  holder.appendChild(scopeWrap);
   document.body.appendChild(holder);
 
   setStatus('PDF wird erstellt...');
 
-  const opt = {
-    margin: 0,
-    filename: currentName + '.pdf',
-    image: { type: 'jpeg', quality: 1 },
-    html2canvas: { scale: 3, useCORS: true, backgroundColor: '#ffffff', windowWidth: A4_WIDTH_PX },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak: { mode: ['avoid-all'] }
+  const finish = () => {
+    if (holder.parentNode) document.body.removeChild(holder);
+    afterSaved();
   };
 
-  html2pdf().set(opt).from(clone).save().then(() => {
-    document.body.removeChild(holder);
-    afterSaved();
+  html2canvas(pageClone, {
+    scale: 3,
+    useCORS: true,
+    backgroundColor: '#ffffff',
+    width: A4_WIDTH_PX,
+    height: A4_HEIGHT_PX,
+    windowWidth: A4_WIDTH_PX,
+    windowHeight: A4_HEIGHT_PX
+  }).then(canvas => {
+    const imgData = canvas.toDataURL('image/jpeg', 1.0);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    // Bild exakt auf A4 (210 x 297 mm) legen = genau eine Seite
+    pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
+    pdf.save(currentName + '.pdf');
+    finish();
     setStatus('PDF gespeichert: ' + currentName + '.pdf');
   }).catch(err => {
-    if (holder.parentNode) document.body.removeChild(holder);
+    finish();
     setStatus('Fehler beim Speichern: ' + (err && err.message ? err.message : err));
   });
 }
