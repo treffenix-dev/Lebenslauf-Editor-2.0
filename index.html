@@ -7,8 +7,6 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1a1a1a">
 <title>Anschreiben Editor</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -192,6 +190,63 @@
   @media (max-width: 420px) {
     .topbar h1 { font-size: 0.95rem; letter-spacing: 0.5px; }
     .btn { padding: 9px 11px; font-size: 0.64rem; letter-spacing: 0.6px; }
+  }
+
+  /* ---------- DRUCK / "ALS PDF SPEICHERN" ----------
+     Sorgt fuer GENAU EINE saubere A4-Seite:
+     - @page margin:0  -> Browser laesst Kopf-/Fusszeile (URL, Datum, Uhrzeit,
+       "Seite 1 von 2") weg, weil kein Rand dafuer reserviert ist.
+     - feste 210x297mm + overflow:hidden -> kein Ueberlauf auf eine 2. Seite,
+       nichts wird abgeschnitten.
+     - print-color-adjust:exact -> Farbflaechen (schwarzer Balken, Gold)
+       werden wirklich mitgedruckt.
+     - App-Bedienelemente werden ausgeblendet, nur das Blatt bleibt. */
+  @page { size: A4 portrait; margin: 0; }
+
+  @media print {
+    html, body {
+      width: 210mm;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #fff !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body { display: block !important; min-height: 0 !important; }
+
+    /* App-Oberflaeche raus – nur das Dokument drucken */
+    .topbar, .edit-hint, .statusbar, .picker, #file-input { display: none !important; }
+
+    .workspace {
+      display: block !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      overflow: visible !important;
+      background: #fff !important;
+    }
+    #doc-scale {
+      width: auto !important;
+      height: auto !important;
+      margin: 0 !important;
+    }
+    /* Bildschirm-Verkleinerung aufheben -> volle A4-Breite drucken */
+    #doc-frame {
+      transform: none !important;
+      width: 210mm !important;
+      margin: 0 !important;
+      box-shadow: none !important;
+    }
+    /* Eingebaute Vorlagen: exakt ein A4-Blatt */
+    .letter-root .page {
+      width: 210mm !important;
+      height: 297mm !important;
+      margin: 0 !important;
+      box-shadow: none !important;
+      overflow: hidden !important;
+    }
+    .letter-root .page::before { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    /* Eigene Uploads: auf A4-Breite begrenzen, damit nichts ueber den Rand laeuft */
+    .doc-upload-scope { width: 210mm !important; max-width: 210mm !important; }
   }
 </style>
 </head>
@@ -644,86 +699,35 @@ document.getElementById('doc-frame').addEventListener('input', () => {
   draftTimer = setTimeout(saveDraft, 500); // keep work-in-progress if user leaves
 });
 
-/* ---- Als PDF speichern via html2canvas + jsPDF ----
-   Erzeugt das PDF DIREKT (ohne Browser-Druckdialog): KEIN URL/GitHub-Link,
-   KEIN Datum, KEINE Seitenzahl. Es wird GENAU das .page-Element in exakter
-   A4-Groesse abfotografiert und als EINE Seite ins PDF gelegt. */
-const A4_HEIGHT_PX = 1122.5; // 297mm @ 96dpi
-
+/* ---- Als PDF speichern / Drucken via NATIVEN Druck ----
+   Bewusst KEIN html2canvas/jsPDF mehr. Gruende:
+   - Auf dem Handy lieferte die Canvas-Methode oft nur ein Bild oder einen
+     weissen Screen (CDN-/Speicher-/iOS-Eigenheiten).
+   - Der native Druck erzeugt auf JEDEM Geraet (iOS, Android, PC) ein echtes,
+     gestochen scharfes PDF: im Dialog "Als PDF speichern" waehlen, auf dem
+     iPhone ueber das Teilen-Menue "In Dateien sichern".
+   Saubere EINE A4-Seite OHNE Browser-Kopf-/Fusszeilen (URL, Datum, Uhrzeit,
+   Seitenzahl) kommt komplett aus den @media print + @page { margin:0 }-Regeln
+   oben im <style>. Hier muss nur noch der Druck ausgeloest werden. */
 function saveAsPDF() {
-  if (editMode) toggleEdit();
+  if (editMode) toggleEdit();           // Bearbeiten-Outline entfernen
+  setStatus('Druckdialog wird geoeffnet — dort "Als PDF speichern" waehlen.');
+  // kurzer Tick, damit Status/Layout ruhen, bevor der Dialog aufgeht
+  setTimeout(() => { window.print(); }, 60);
+}
 
+/* Vor dem Druck die Bildschirm-Verkleinerung (transform: scale) entfernen,
+   sonst druckt manche Engine das verkleinerte Vorschaubild. Die @media print-
+   Regeln erzwingen zusaetzlich die volle A4-Breite. Nach dem Druck die
+   Vorschau wieder passend einskalieren. */
+window.addEventListener('beforeprint', () => {
   const frame = document.getElementById('doc-frame');
-  // Das eigentliche A4-Blatt finden (eingebaute Vorlage ODER Upload)
-  const sourcePage = frame.querySelector('.page') || frame;
-
-  // saubere Kopie ohne Bearbeiten-Marker / Skalierung
-  const pageClone = sourcePage.cloneNode(true);
-  pageClone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
-
-  // Exakte A4-Pixelmasse erzwingen, damit genau EINE Seite entsteht
-  pageClone.style.transform = 'none';
-  pageClone.style.margin = '0';
-  pageClone.style.width = A4_WIDTH_PX + 'px';
-  pageClone.style.height = A4_HEIGHT_PX + 'px';
-  pageClone.style.minHeight = A4_HEIGHT_PX + 'px';
-  pageClone.style.maxHeight = A4_HEIGHT_PX + 'px';
-  pageClone.style.boxShadow = 'none';
-  pageClone.style.overflow = 'hidden';
-
-  // Off-screen Container (gleicher CSS-Scope wie Vorschau, damit Styles greifen)
-  const holder = document.createElement('div');
-  holder.style.position = 'fixed';
-  holder.style.left = '-99999px';
-  holder.style.top = '0';
-  holder.style.width = A4_WIDTH_PX + 'px';
-  holder.style.height = A4_HEIGHT_PX + 'px';
-  holder.style.background = '#fff';
-  // Scope-Klassen mitgeben (letter-root / doc-upload-scope)
-  const scopeWrap = document.createElement('div');
-  scopeWrap.className = frame.firstElementChild ? frame.firstElementChild.className : '';
-  scopeWrap.appendChild(pageClone);
-  holder.appendChild(scopeWrap);
-  document.body.appendChild(holder);
-
-  setStatus('PDF wird erstellt...');
-
-  const finish = () => {
-    if (holder.parentNode) document.body.removeChild(holder);
-    afterSaved();
-  };
-
-  html2canvas(pageClone, {
-    scale: 3,
-    useCORS: true,
-    backgroundColor: '#ffffff',
-    width: A4_WIDTH_PX,
-    height: A4_HEIGHT_PX,
-    windowWidth: A4_WIDTH_PX,
-    windowHeight: A4_HEIGHT_PX
-  }).then(canvas => {
-    const imgData = canvas.toDataURL('image/jpeg', 1.0);
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    // Bild exakt auf A4 (210 x 297 mm) legen = genau eine Seite
-    pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
-    pdf.save(currentName + '.pdf');
-    finish();
-    setStatus('PDF gespeichert: ' + currentName + '.pdf');
-  }).catch(err => {
-    finish();
-    setStatus('Fehler beim Speichern: ' + (err && err.message ? err.message : err));
-  });
-}
-
-/* Nach dem Speichern: Entwurf verwerfen und ORIGINAL-Vorlage wiederherstellen */
-function afterSaved() {
-  if (currentKey && LETTERS[currentKey]) {
-    clearDraft(currentKey);
-    document.getElementById('doc-frame').innerHTML = LETTERS[currentKey].body;
-    requestAnimationFrame(scaleFrame);
-  }
-}
+  if (frame) frame.style.transform = 'none';
+});
+window.addEventListener('afterprint', () => {
+  requestAnimationFrame(scaleFrame);
+  setStatus('Bereit');
+});
 
 /* textContent statt innerHTML: verhindert XSS ueber Datei-/Personennamen */
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
