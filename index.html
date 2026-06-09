@@ -707,17 +707,63 @@ document.getElementById('doc-frame').addEventListener('input', () => {
    IMMER seine eigene Kopf-/Fusszeile ein -> URL/GitHub-Link, Datum, Uhrzeit,
    "Seite 1 von 2". Das laesst sich per CSS NICHT zuverlaessig abschalten.
    Deshalb wird hier das A4-Blatt mit html2canvas als Bild aufgenommen und mit
-   jsPDF in EIN exaktes A4-PDF (210x297mm, eine Seite) gelegt und heruntergeladen.
-   Ergebnis: KEIN Link, KEIN Datum/Uhrzeit, KEINE Seitenzahl, garantiert 1 Seite,
-   auf iOS, Android und PC gleich. */
+   jsPDF in EIN exaktes A4-PDF (210x297mm, eine Seite) gelegt.
+   Ergebnis: KEIN Link, KEIN Datum/Uhrzeit, KEINE Seitenzahl, garantiert 1 Seite.
+
+   AUSLIEFERUNG (mobil optimiert):
+   - iOS/iPhone: jsPDF.save() zeigt nur eine Inline-Vorschau ("nur ein Bild"),
+     ohne echte Speichern/Drucken-Option. Deshalb auf iOS das NATIVE Teilen-Menue
+     (navigator.share mit Datei) -> "In Dateien sichern", Drucken, Mail, AirDrop.
+   - Android/Desktop: echter Datei-Download (<a download>), zusaetzlich Teilen
+     als Fallback. So funktioniert das Speichern auf JEDEM Geraet. */
 const A4_HEIGHT_PX = 1122.5; // 297mm @ 96dpi
 
 function isMobileDevice() {
   return /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent)
       || Math.min(screen.width, screen.height) < 820;
 }
+function isIOS() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS
+}
 
-function saveAsPDF() {
+/* Liefert das fertige PDF geraetegerecht aus. Reihenfolge je Plattform so
+   gewaehlt, dass IMMER eine echte Speichern-/Druckmoeglichkeit erscheint. */
+async function deliverPDF(blob, fileName, pdf) {
+  const file = new File([blob], fileName, { type: 'application/pdf' });
+  const canShareFile = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+
+  const tryShare = async () => {
+    try { await navigator.share({ files: [file], title: fileName }); setStatus('Gespeichert/Geteilt: ' + fileName); return true; }
+    catch (e) { if (e && e.name === 'AbortError') { setStatus('Abgebrochen'); return true; } return false; }
+  };
+  const tryDownload = () => {
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setStatus('PDF gespeichert: ' + fileName); return true;
+    } catch (e) { return false; }
+  };
+  const tryOpen = () => {
+    try { window.open(pdf.output('bloburl'), '_blank'); setStatus('PDF geoeffnet — ueber Teilen sichern.'); return true; }
+    catch (e) { return false; }
+  };
+
+  // iOS: Teilen ist die EINZIGE zuverlaessige Speichermoeglichkeit -> zuerst.
+  if (isIOS() && canShareFile) { if (await tryShare()) return; }
+  // Android/Desktop: direkter Download -> sonst Teilen -> sonst neuer Tab.
+  if (tryDownload()) return;
+  if (canShareFile && await tryShare()) return;
+  if (tryOpen()) return;
+  setStatus('Konnte PDF nicht ausliefern — bitte erneut versuchen.');
+}
+
+/* async, OHNE setTimeout: haelt die "user activation" des Tipps am Leben,
+   damit navigator.share auf iOS nicht mit NotAllowedError abbricht. */
+async function saveAsPDF() {
   if (editMode) toggleEdit();
 
   if (!window.html2canvas || !(window.jspdf && window.jspdf.jsPDF)) {
@@ -740,7 +786,6 @@ function saveAsPDF() {
   clone.style.overflow = 'hidden';
 
   // Sichtbar (nicht off-screen) rendern -> verhindert leere/weisse Captures.
-  // Liegt nur Sekundenbruchteile ueber dem Bildschirm, mit gleichem CSS-Scope.
   const holder = document.createElement('div');
   holder.className = scopeClass;
   holder.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;background:#fff;'
@@ -752,34 +797,25 @@ function saveAsPDF() {
 
   // Auf dem Handy kleinere Aufloesung -> kein Speicher-Crash / weisser Screen
   const scale = isMobileDevice() ? 2 : 3;
-
   const cleanup = () => { if (holder.parentNode) document.body.removeChild(holder); };
 
-  setTimeout(() => {
-    html2canvas(clone, {
-      scale: scale,
-      backgroundColor: '#ffffff',
-      useCORS: true,
-      logging: false,
-      width: A4_WIDTH_PX,
-      height: A4_HEIGHT_PX,
-      windowWidth: A4_WIDTH_PX,
-      windowHeight: A4_HEIGHT_PX,
-      scrollX: 0,
-      scrollY: 0
-    }).then(canvas => {
-      cleanup();
-      const img = canvas.toDataURL('image/jpeg', 0.95);
-      const jsPDF = window.jspdf.jsPDF;
-      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
-      pdf.addImage(img, 'JPEG', 0, 0, 210, 297, undefined, 'FAST'); // exakt A4 = 1 Seite
-      pdf.save(currentName + '.pdf');
-      setStatus('PDF gespeichert: ' + currentName + '.pdf');
-    }).catch(err => {
-      cleanup();
-      setStatus('Fehler beim Erstellen: ' + (err && err.message ? err.message : err));
+  try {
+    const canvas = await html2canvas(clone, {
+      scale: scale, backgroundColor: '#ffffff', useCORS: true, logging: false,
+      width: A4_WIDTH_PX, height: A4_HEIGHT_PX,
+      windowWidth: A4_WIDTH_PX, windowHeight: A4_HEIGHT_PX, scrollX: 0, scrollY: 0
     });
-  }, 90);
+    cleanup();
+    const img = canvas.toDataURL('image/jpeg', 0.95);
+    const jsPDF = window.jspdf.jsPDF;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+    pdf.addImage(img, 'JPEG', 0, 0, 210, 297, undefined, 'FAST'); // exakt A4 = 1 Seite
+    const blob = pdf.output('blob');
+    await deliverPDF(blob, currentName + '.pdf', pdf);
+  } catch (err) {
+    cleanup();
+    setStatus('Fehler beim Erstellen: ' + (err && err.message ? err.message : err));
+  }
 }
 
 /* textContent statt innerHTML: verhindert XSS ueber Datei-/Personennamen */
