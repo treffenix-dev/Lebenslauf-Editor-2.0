@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a1a">
+<title>Anschreiben Editor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  /* iOS Safari NICHT die Schriftgroessen automatisch aufblaehen lassen –
+     sonst "verspringt" das Layout nach einem Browser-Refresh. */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  :root {
+    --bg: #1a1a1a;
+    --panel: #242424;
+    --border: #333;
+    --gold: #c9a96e;
+    --text: #f0ede8;
+    --muted: #888;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: 'Gill Sans', 'Optima', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overscroll-behavior: none;
+  }
+
+  /* ---------- TOP BAR ---------- */
+  .topbar {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: calc(10px + var(--safe-top)) 16px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .topbar h1 {
+    font-family: 'Palatino Linotype', Georgia, serif;
+    font-size: 1.05rem;
+    font-weight: 400;
+    color: var(--gold);
+    letter-spacing: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;          /* darf schrumpfen statt zu ueberlaufen */
+    flex: 0 1 auto;
+  }
+  .topbar-actions { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; }
+
+  .btn {
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    transition: all 0.2s;
+    white-space: nowrap;
+    -webkit-appearance: none;
+  }
+  .btn-primary { background: var(--gold); color: #1a1a1a; font-weight: 600; }
+  .btn-primary:active { background: #d4b07a; }
+  .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-outline:active { border-color: var(--gold); color: var(--gold); }
+  .btn-icon { padding: 10px 12px; }
+  .btn[disabled] { opacity: 0.5; pointer-events: none; }
+
+  /* ---------- EDIT HINT ---------- */
+  .edit-hint {
+    background: rgba(201,169,110,0.12);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    font-size: 0.72rem;
+    color: var(--gold);
+    letter-spacing: 0.3px;
+    text-align: center;
+  }
+
+  /* ---------- PICKER ---------- */
+  .picker {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px calc(32px + var(--safe-bottom));
+    gap: 28px;
+  }
+  .picker-intro { text-align: center; max-width: 440px; }
+  .picker-intro h2 {
+    font-family: 'Palatino Linotype', Georgia, serif;
+    font-weight: 400; font-size: 1.6rem; color: var(--text); margin-bottom: 10px;
+  }
+  .picker-intro p { color: var(--muted); font-size: 0.9rem; line-height: 1.6; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px; width: 100%; max-width: 440px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .card:active { border-color: var(--gold); transform: scale(0.98); }
+  @media (hover: hover) { .card:hover { border-color: var(--gold); background: #2a2a2a; } }
+  .card-avatar {
+    width: 54px; height: 54px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--gold), #a8895a);
+    color: #1a1a1a; display: flex; align-items: center; justify-content: center;
+    font-family: 'Palatino Linotype', Georgia, serif; font-size: 1.4rem; font-weight: 600;
+  }
+  .card-name { font-size: 1rem; color: var(--text); font-weight: 500; }
+  .card-role { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.5px; text-transform: uppercase; }
+  .card-load { border-style: dashed; color: var(--muted); }
+  .card-load .card-avatar { background: transparent; border: 1.5px dashed var(--border); color: var(--muted); }
+
+  /* ---------- WORKSPACE ---------- */
+  /* Heller Hintergrund wie im Original-Anschreiben, damit die Vorschau
+     genauso aussieht wie die echte Vorlage. */
+  .workspace {
+    flex: 1;
+    padding: 20px 12px calc(28px + var(--safe-bottom));
+    display: none;
+    justify-content: center;
+    align-items: flex-start;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    background: #e8e6e1;
+  }
+  .workspace.active { display: flex; }
+
+  /* OUTER wrapper takes the *scaled* size so flex-centering works on mobile.
+     INNER frame keeps full A4 width and is shrunk with transform. */
+  #doc-scale { position: relative; }
+  #doc-frame {
+    width: 210mm;
+    background: white;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    color: #000;
+    transform-origin: top left;
+  }
+  #doc-frame.editing [contenteditable="true"]:hover {
+    outline: 1px dashed var(--gold); outline-offset: 2px; cursor: text;
+  }
+  #doc-frame.editing [contenteditable="true"]:focus {
+    outline: 2px solid var(--gold); outline-offset: 2px; background: rgba(201,169,110,0.08);
+  }
+
+  /* ---------- STATUS BAR ---------- */
+  .statusbar {
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 7px 16px calc(7px + var(--safe-bottom));
+    font-size: 0.66rem; color: var(--muted); letter-spacing: 0.3px; text-align: center;
+  }
+
+  #file-input { display: none; }
+
+  @media (max-width: 420px) {
+    .topbar h1 { font-size: 0.95rem; letter-spacing: 0.5px; }
+    .btn { padding: 9px 11px; font-size: 0.64rem; letter-spacing: 0.6px; }
+  }
+
+  /* ---------- PRINT AREA (für "Als PDF speichern") ---------- */
+  /* Off-screen on screen view; becomes the only visible thing when printing. */
+  #print-area { position: absolute; left: -99999px; top: 0; width: 210mm; }
+
+  @media print {
+    @page { size: A4; margin: 0; }
+    html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; height: auto !important; }
+    /* App-Oberflaeche komplett ausblenden, damit keine leeren Seiten entstehen */
+    .topbar, .edit-hint, .picker, .workspace, .statusbar, #file-input { display: none !important; }
+    /* Nur den Druckbereich zeigen – im normalen Fluss, exakt A4 */
+    #print-area { position: static !important; left: auto !important; top: auto !important; width: 210mm !important; }
+    #print-area .page { box-shadow: none !important; width: 100% !important; min-height: auto !important; }
+    #print-area .page::before { display: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<input type="file" id="file-input" accept=".html,.htm">
+
+<div class="topbar">
+  <button class="btn btn-outline btn-icon" id="back-btn" onclick="goHome()" style="display:none;">&larr;</button>
+  <h1>Anschreiben Editor</h1>
+  <div class="topbar-actions">
+    <button class="btn btn-outline" id="edit-toggle" onclick="toggleEdit()" style="display:none;">Bearbeiten</button>
+    <button class="btn btn-primary" id="save-btn" onclick="saveAsPDF()" style="display:none;">PDF</button>
+  </div>
+</div>
+
+<div class="edit-hint" id="edit-hint" style="display:none;">
+  Bearbeiten aktiv &mdash; tippe auf einen Text um ihn zu &auml;ndern. Die &Auml;nderungen gelten nur f&uuml;r dein PDF &middot; die Vorlage bleibt unver&auml;ndert.
+</div>
+
+<div class="picker" id="picker">
+  <div class="picker-intro">
+    <h2>Wer m&ouml;chte ein Anschreiben?</h2>
+    <p>W&auml;hle dein Anschreiben, passe den Text bei Bedarf an und speichere es als PDF. Die Vorlage auf der Website bleibt dabei immer gleich.</p>
+  </div>
+  <div class="cards" id="cards">
+    <div class="card card-load" onclick="document.getElementById('file-input').click()">
+      <div class="card-avatar">+</div>
+      <div class="card-name">Eigene Datei</div>
+      <div class="card-role">HTML laden</div>
+    </div>
+  </div>
+</div>
+
+<div class="workspace" id="workspace">
+  <div id="doc-scale">
+    <div id="doc-frame"></div>
+  </div>
+</div>
+
+<!-- Wird nur beim Drucken/PDF-Speichern sichtbar -->
+<div id="print-area" aria-hidden="true"></div>
+
+<div class="statusbar" id="status">Bereit</div>
+
+<script>
+/* ============================================================
+   ANSCHREIBEN EDITOR  –  Website (GitHub Pages)
+   - Jamie & Liza fest eingebaut, Vorlage bleibt IMMER gleich
+   - Bearbeiten nur fuer das PDF (nichts wird dauerhaft gespeichert)
+   - Als PDF speichern via nativem Druck (ohne externe Bibliothek)
+   - Dynamische Skalierung fuer jedes Handy
+   ============================================================ */
+
+/* Sicherheits-Sanitizer: entfernt <script>, Event-Handler (on*) und
+   javascript:-URLs aus nicht vertrauenswuerdigem HTML (Upload/Entwurf),
+   bevor es per innerHTML eingefuegt wird. <template> parst inert (kein
+   Laden/Ausfuehren waehrend der Pruefung). */
+function sanitizeHTML(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html);
+  tpl.content.querySelectorAll('script, iframe, object, embed, meta, base, link[rel="import"]').forEach(n => n.remove());
+  tpl.content.querySelectorAll('*').forEach(el => {
+    Array.from(el.attributes).forEach(attr => {
+      const name = attr.name.toLowerCase();
+      const val = (attr.value || '').replace(/[\u0000-\u001F\u00A0]+/g, '').trim();
+      if (name.startsWith('on')) el.removeAttribute(attr.name);
+      else if (name === 'srcdoc') el.removeAttribute(attr.name);
+      else if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'formaction' || name === 'action') && /^javascript:/i.test(val)) el.removeAttribute(attr.name);
+      else if (name === 'style' && /expression\s*\(|javascript:/i.test(val)) el.removeAttribute(attr.name);
+    });
+  });
+  return tpl.innerHTML;
+}
+
+function removeInjectedStyles() {
+  document.querySelectorAll('[data-injected]').forEach(el => el.remove());
+}
+
+const LETTER_CSS = `
+  .letter-root, .letter-root * { font-family: 'Gill Sans', 'Optima', 'Trebuchet MS', sans-serif; }
+  .letter-root .l-name, .letter-root .l-subject, .letter-root .closing-name {
+    font-family: 'Palatino Linotype', 'Palatino', 'Book Antiqua', 'Garamond', Georgia, serif;
+  }
+  .letter-root *, .letter-root *::before, .letter-root *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  .letter-root {
+    --ink: #0f0f0e; --ink-muted: #6b6860; --ink-faint: #b0ada6;
+    --paper: #faf9f7; --line: #dddbd6; --gold: #c9a96e;
+    font-size: 10pt; color: var(--ink);
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  }
+  .letter-root .page {
+    background: var(--paper); width: 210mm; min-height: 297mm;
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+  }
+  .letter-root .page::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--ink); }
+  .letter-root .header { padding: 36px 52px 26px 56px; border-bottom: 0.5px solid var(--line); }
+  .letter-root .header-inner { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+  .letter-root .l-name { font-size: 36pt; font-weight: 300; letter-spacing: -1px; line-height: 1; color: var(--ink); }
+  .letter-root .l-name span { font-weight: 600; }
+  .letter-root .title-tag { margin-top: 8px; font-size: 8pt; letter-spacing: 3.5px; text-transform: uppercase; color: var(--ink-muted); font-weight: 400; }
+  .letter-root .contact-block { text-align: right; flex-shrink: 0; }
+  .letter-root .contact-block p { font-size: 8pt; color: var(--ink-muted); line-height: 1.8; }
+  .letter-root .contact-block p strong { color: var(--ink); font-weight: 500; }
+  .letter-root .letter-body { padding: 44px 56px; flex: 1; display: flex; flex-direction: column; }
+  .letter-root .recipient { font-size: 8.5pt; color: var(--ink-muted); line-height: 1.8; }
+  .letter-root .recipient strong { color: var(--ink); font-size: 9pt; }
+  .letter-root .date-line { font-size: 8pt; color: var(--ink-faint); text-align: right; }
+  .letter-root .l-subject { font-size: 15pt; font-weight: 500; color: var(--ink); margin-bottom: 6px; line-height: 1.3; }
+  .letter-root .subject-sub { font-size: 8pt; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin-bottom: 32px; }
+  .letter-root .divider { height: 0.5px; background: var(--line); margin-bottom: 28px; }
+  .letter-root .letter-text { font-size: 9.5pt; color: var(--ink-muted); line-height: 1.85; flex: 1; }
+  .letter-root .letter-text p { margin-bottom: 16px; }
+  .letter-root .letter-text p:last-child { margin-bottom: 0; }
+  .letter-root .closing { margin-top: 36px; font-size: 9.5pt; color: var(--ink-muted); line-height: 1.8; }
+  .letter-root .closing-name { font-size: 13pt; font-weight: 500; color: var(--ink); margin-top: 36px; }
+  .letter-root .footer { padding: 0 52px 24px 56px; }
+  .letter-root .footer-line { height: 0.5px; background: var(--line); margin-bottom: 14px; }
+  .letter-root .footer-text { display: flex; justify-content: space-between; font-size: 7pt; color: var(--ink-faint); letter-spacing: 0.5px; }
+`;
+
+
+const LETTERS = {
+  liza: {
+    name: 'Liza Hoffmann', role: 'Pflege & Service', initials: 'LH',
+    body: `
+<div class="letter-root">
+<div class="page">
+  <header class="header">
+    <div class="header-inner">
+      <div>
+        <div class="l-name"><span>Liza</span> Hoffmann</div>
+        <div class="title-tag">Pflege &amp; Service &middot; Engagierte&nbsp;Berufseinsteigerin</div>
+      </div>
+      <div class="contact-block">
+        <p><strong>+49 176 23111213</strong></p>
+        <p>Liza.hoffmann23@gmail.com</p>
+        <p>Vogelsang 32a, 32657 Lemgo</p>
+        <p style="margin-top:4px; color:#b0ada6; font-size:7.5pt;">18. August 2005 &middot; Deutschland</p>
+      </div>
+    </div>
+  </header>
+  <div class="letter-body">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:32px;">
+      <div class="recipient"><strong>[Unternehmen]</strong><br>Personalverantwortliche/r<br></div>
+      <div class="date-line">Lemgo, Mai 2026</div>
+    </div>
+    <div class="l-subject">Initiativbewerbung Saisonstelle</div>
+    <div class="subject-sub">Ab sofort verf&uuml;gbar</div>
+    <div class="divider"></div>
+    <div class="letter-text">
+      <p>Sehr geehrte Damen und Herren,</p>
+      <p>mit gro&szlig;em Interesse bewerbe ich mich initiativ f&uuml;r eine Saisonstelle in Ihrem Unternehmen. Ich bin 20 Jahre alt, habe im Mai 2026 meine dreij&auml;hrige Ausbildung zur Pflegefachkraft am Klinikum Lippe Lemgo erfolgreich abgeschlossen und bin nun bereit, den n&auml;chsten Schritt in meinem Berufsleben zu gehen. Eine Saisonstelle entspricht genau meinen Vorstellungen ich m&ouml;chte nach meinem Abschluss neue Erfahrungen sammeln, in einem anderen Umfeld arbeiten und mich dabei weiterentwickeln.</p>
+      <p>Durch meine Ausbildung habe ich gelernt, professionell und einf&uuml;hlsam mit Menschen umzugehen, auch in anspruchsvollen und stressigen Situationen. Ich bin es gewohnt, Verantwortung zu &uuml;bernehmen, im Team zu arbeiten und zuverl&auml;ssig zu handeln. Diese F&auml;higkeiten m&ouml;chte ich nun in einem neuen Umfeld einbringen und weiterentwickeln.</p>
+      <p>Neben meiner Ausbildung habe ich praktische Erfahrung im direkten Kundenkontakt gesammelt: Als Servicemitarbeiterin im M&uuml;nchner L&ouml;wenbr&auml;u habe ich G&auml;ste eigenst&auml;ndig betreut, serviert und kassiert. Erg&auml;nzend dazu habe ich w&auml;hrend meines Schulpraktikums in einer chirurgischen Praxis Erfahrungen in Empfang, Organisation und der Betreuung von Patienten gemacht.</p>
+      <p>Ich bin motiviert, lernbereit und bringe echte Freude am Umgang mit Menschen mit. Ich stehe ab sofort zur Verf&uuml;gung und freue mich auf die M&ouml;glichkeit, mich in einem pers&ouml;nlichen Gespr&auml;ch vorzustellen.</p>
+    </div>
+    <div class="closing">Mit freundlichen Gr&uuml;&szlig;en<div class="closing-name">Liza Hoffmann</div></div>
+  </div>
+  <div class="footer">
+    <div class="footer-line"></div>
+    <div class="footer-text"><span>Liza Hoffmann &middot; Anschreiben 2026</span><span>Anlage: Lebenslauf</span></div>
+  </div>
+</div>
+</div>`
+  },
+  jamie: {
+    name: 'Jamie Zimmermann', role: 'Service & Logistik', initials: 'JZ',
+    body: `
+<div class="letter-root">
+<div class="page">
+  <header class="header">
+    <div class="header-inner">
+      <div>
+        <div class="l-name"><span>Jamie</span> Zimmermann</div>
+        <div class="title-tag">Service &amp; Logistik &middot; Flexibler&nbsp;Allrounder</div>
+      </div>
+      <div class="contact-block">
+        <p><strong>+49 176 43551273</strong></p>
+        <p>Jamiezimmerman43@gmail.com</p>
+        <p>Grasweg 6, 32657 Lemgo</p>
+        <p style="margin-top:4px; color:#b0ada6; font-size:7.5pt;">Deutschland</p>
+      </div>
+    </div>
+  </header>
+  <div class="letter-body">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:32px;">
+      <div class="recipient"><strong>[Unternehmen]</strong><br>Personalverantwortliche/r<br></div>
+      <div class="date-line">Lemgo, Mai 2026</div>
+    </div>
+    <div class="l-subject">Initiativbewerbung</div>
+    <div class="subject-sub">Ab sofort verf&uuml;gbar</div>
+    <div class="divider"></div>
+    <div class="letter-text">
+      <p>Sehr geehrte Damen und Herren,</p>
+      <p>hiermit bewerbe ich mich initiativ in Ihrem Unternehmen. Ich bin ein vielseitiger und belastbarer Mitarbeiter mit praktischer Erfahrung in mehreren Bereichen und bin auf der Suche nach einer neuen Herausforderung, bei der ich meine F&auml;higkeiten gezielt einbringen und weiterentwickeln kann.</p>
+      <p>Ich habe meine Ausbildung zum Tischler erfolgreich abgeschlossen und dabei gelernt, pr&auml;zise, sorgf&auml;ltig und handwerklich zu arbeiten. Durch verschiedene T&auml;tigkeiten in der Gastronomie, im Service sowie in der Logistik habe ich mir ein breites Erfahrungsspektrum aufgebaut. Als Kellner in der Walkenm&uuml;hle und als Servicekraft beim Kalimera Grill habe ich direkten G&auml;stekontakt gepflegt, Bestellungen aufgenommen und eigenst&auml;ndig abgerechnet. Bei Amazon habe ich im Schichtbetrieb gelernt, strukturiert, zuverl&auml;ssig und unter Zeitdruck zu arbeiten.</p>
+      <p>Ich bin teamf&auml;hig, schnell einzuarbeiten und bringe eine hohe Bereitschaft mit, mich auf neue Aufgaben und Umgebungen einzustellen. Ich besitze einen F&uuml;hrerschein der Klasse B und bin ab sofort verf&uuml;gbar.</p>
+      <p>Ich freue mich auf die M&ouml;glichkeit, mich in einem pers&ouml;nlichen Gespr&auml;ch vorzustellen und bin &uuml;berzeugt, dass ich Ihrem Team einen echten Mehrwert bieten kann.</p>
+    </div>
+    <div class="closing">Mit freundlichen Gr&uuml;&szlig;en<div class="closing-name">Jamie Zimmermann</div></div>
+  </div>
+  <div class="footer">
+    <div class="footer-line"></div>
+    <div class="footer-text"><span>Jamie Zimmermann &middot; Anschreiben 2026</span><span>Anlage: Lebenslauf</span></div>
+  </div>
+</div>
+</div>`
+  }
+};
+
+let editMode = false;
+let currentKey = null;
+let currentName = 'dokument';
+let uploadHead = '';
+let draftTimer = null;
+const A4_WIDTH_PX = 793.7; // 210mm @ 96dpi
+
+/* Draft = temporary unsaved work-in-progress.
+   Stored in sessionStorage: ueberlebt kurzes Weggehen / App-Wechsel (Tab bleibt
+   aktiv), wird aber beim vollstaendigen Schliessen automatisch geleert – so
+   bleibt die VORLAGE auf der Website dauerhaft im Original und kann nicht
+   "haengen bleiben". Nach dem PDF-Speichern wird der Entwurf ebenfalls verworfen. */
+function draftKey(key) { return 'anschreiben-entwurf:' + key; }
+function getDraft(key) { try { return sessionStorage.getItem(draftKey(key)); } catch (e) { return null; } }
+function saveDraft() {
+  if (!currentKey || currentKey === 'upload') return;
+  const frame = document.getElementById('doc-frame');
+  const clone = frame.cloneNode(true);
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+  try { sessionStorage.setItem(draftKey(currentKey), sanitizeHTML(clone.innerHTML)); } catch (e) {}
+}
+function clearDraft(key) { try { sessionStorage.removeItem(draftKey(key)); } catch (e) {} }
+
+/* Einmalig: alte, dauerhaft gespeicherte Entwuerfe aus localStorage entfernen
+   (frueheres Verhalten konnte Vorlagen "verstellt" erscheinen lassen). */
+(function clearLegacyDrafts() {
+  try {
+    Object.keys(localStorage).forEach(k => {
+      if (k.indexOf('anschreiben-entwurf:') === 0 || k.indexOf('anschreiben:') === 0) localStorage.removeItem(k);
+    });
+  } catch (e) {}
+})();
+
+(function injectBaseCSS() {
+  const s = document.createElement('style');
+  s.id = 'letter-base-css';
+  s.textContent = LETTER_CSS;
+  document.head.appendChild(s);
+})();
+
+function buildCards() {
+  const cards = document.getElementById('cards');
+  const loadCard = cards.querySelector('.card-load');
+  Object.keys(LETTERS).forEach(key => {
+    const l = LETTERS[key];
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.onclick = () => openLetter(key);
+    card.innerHTML =
+      '<div class="card-avatar">' + l.initials + '</div>' +
+      '<div class="card-name">' + l.name + '</div>' +
+      '<div class="card-role">' + l.role + '</div>' +
+      '<div class="card-draft" data-key="' + key + '" style="font-size:0.66rem;color:var(--gold);min-height:0.9em;">' +
+        (getDraft(key) ? '✎ Entwurf wird fortgesetzt' : '') + '</div>';
+    cards.insertBefore(card, loadCard);
+  });
+}
+
+function refreshDraftBadges() {
+  document.querySelectorAll('.card-draft').forEach(el => {
+    el.textContent = getDraft(el.getAttribute('data-key')) ? '✎ Entwurf wird fortgesetzt' : '';
+  });
+}
+
+/* Built-in letters load the ORIGINAL template – unless an unsaved draft exists,
+   then the work-in-progress is restored (cleared again after PDF save). */
+function openLetter(key) {
+  currentKey = key;
+  const l = LETTERS[key];
+  currentName = 'Anschreiben_' + l.name.replace(/\s+/g, '_');
+  uploadHead = '';
+  removeInjectedStyles(); // evtl. CSS einer zuvor geladenen Fremddatei entfernen
+  const draft = getDraft(key);
+  document.getElementById('doc-frame').innerHTML = draft ? sanitizeHTML(draft) : l.body;
+  enterWorkspace();
+  setStatus(draft ? 'Entwurf fortgesetzt: ' + l.name : 'Geladen: ' + l.name + ' (Originalvorlage)');
+}
+
+function loadFile(file) {
+  if (!file.name.match(/\.html?$/i)) { setStatus('Bitte eine HTML-Datei laden (.html)'); return; }
+  currentKey = 'upload';
+  currentName = file.name.replace(/\.[^/.]+$/, '');
+  const reader = new FileReader();
+  reader.onload = e => {
+    const doc = new DOMParser().parseFromString(e.target.result, 'text/html');
+    uploadHead = '';
+    // Nur eigene <style>-Bloecke uebernehmen (keine externen Skripte/Links)
+    doc.querySelectorAll('style').forEach(s => uploadHead += s.outerHTML);
+    removeInjectedStyles();
+    doc.querySelectorAll('style').forEach(s => {
+      const c = s.cloneNode(true); c.setAttribute('data-injected', 'true'); document.head.appendChild(c);
+    });
+    document.getElementById('doc-frame').innerHTML = sanitizeHTML(doc.body.innerHTML);
+    enterWorkspace();
+    setStatus('Geladen: ' + file.name);
+  };
+  reader.readAsText(file);
+}
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) loadFile(e.target.files[0]);
+  e.target.value = '';
+});
+
+function enterWorkspace() {
+  document.getElementById('picker').style.display = 'none';
+  document.getElementById('workspace').classList.add('active');
+  document.getElementById('back-btn').style.display = 'inline-block';
+  document.getElementById('edit-toggle').style.display = 'inline-block';
+  document.getElementById('save-btn').style.display = 'inline-block';
+  if (editMode) toggleEdit();
+  // wait a frame so layout/fonts settle, then scale
+  requestAnimationFrame(() => requestAnimationFrame(scaleFrame));
+  // Nachberechnen, sobald Schriften geladen sind (verhindert "haengende" Halb-Ansicht)
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(scaleFrame).catch(() => {});
+  setTimeout(scaleFrame, 300);
+}
+
+function goHome() {
+  if (editMode) { saveDraft(); toggleEdit(); }
+  document.getElementById('workspace').classList.remove('active');
+  document.getElementById('picker').style.display = 'flex';
+  document.getElementById('back-btn').style.display = 'none';
+  document.getElementById('edit-toggle').style.display = 'none';
+  document.getElementById('save-btn').style.display = 'none';
+  refreshDraftBadges();
+  setStatus('Bereit');
+}
+
+/* ---- Dynamische Skalierung: A4 auf die Viewport-Breite verkleinern und den
+   Wrapper auf die skalierte Groesse setzen (damit Zentrierung/Scroll stimmen).
+   Defensiv gegen 0/ungueltige Breiten waehrend des Ladens. ---- */
+function scaleFrame() {
+  const ws = document.getElementById('workspace');
+  if (!ws.classList.contains('active')) return;
+  const scaleWrap = document.getElementById('doc-scale');
+  const frame = document.getElementById('doc-frame');
+  if (!scaleWrap || !frame) return;
+
+  const cs = getComputedStyle(ws);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+
+  // bevorzugt die echte Inhaltsbreite; Fallbacks fuer iOS-Ladephasen
+  let available = ws.clientWidth - padX;
+  if (!available || available < 1) {
+    const vv = window.visualViewport ? window.visualViewport.width : 0;
+    available = (vv || window.innerWidth || A4_WIDTH_PX) - padX;
+  }
+
+  let scale = available / A4_WIDTH_PX;
+  if (!isFinite(scale) || scale <= 0) scale = 1;
+  scale = Math.min(1, scale);
+
+  frame.style.width = A4_WIDTH_PX + 'px';
+  frame.style.transform = 'scale(' + scale + ')';
+
+  const realH = frame.offsetHeight;            // unskalierte Layout-Hoehe
+  scaleWrap.style.width = (A4_WIDTH_PX * scale) + 'px';
+  scaleWrap.style.height = (realH * scale) + 'px';
+}
+
+let resizeRAF = null;
+function requestScale() {
+  cancelAnimationFrame(resizeRAF);
+  resizeRAF = requestAnimationFrame(scaleFrame);
+}
+window.addEventListener('resize', requestScale);
+window.addEventListener('orientationchange', () => setTimeout(scaleFrame, 200));
+window.addEventListener('load', () => { if (document.getElementById('workspace').classList.contains('active')) scaleFrame(); });
+window.addEventListener('pageshow', () => { if (document.getElementById('workspace').classList.contains('active')) scaleFrame(); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', requestScale);
+
+/* Universellster Mechanismus fuer JEDES Geraet (Android + iPhone + Desktop):
+   beobachtet die tatsaechliche Breite des Arbeitsbereichs und skaliert bei
+   jeder Aenderung automatisch neu – unabhaengig von Events/Browser-Eigenheiten. */
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(() => requestScale());
+  ro.observe(document.getElementById('workspace'));
+}
+
+/* ---- Editing (temporary, only for the PDF) ---- */
+function toggleEdit() {
+  editMode = !editMode;
+  const frame = document.getElementById('doc-frame');
+  const btn = document.getElementById('edit-toggle');
+  const hint = document.getElementById('edit-hint');
+
+  if (editMode) {
+    makeEditable(frame);
+    frame.classList.add('editing');
+    btn.textContent = 'Fertig';
+    btn.classList.remove('btn-outline'); btn.classList.add('btn-primary');
+    hint.style.display = 'block';
+    setStatus('Bearbeitungsmodus aktiv (nur für dein PDF)');
+  } else {
+    saveDraft();
+    frame.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+    frame.classList.remove('editing');
+    btn.textContent = 'Bearbeiten';
+    btn.classList.add('btn-outline'); btn.classList.remove('btn-primary');
+    hint.style.display = 'none';
+    setStatus('Bearbeitung pausiert (Entwurf gesichert)');
+  }
+  requestAnimationFrame(scaleFrame);
+}
+
+function makeEditable(root) {
+  const selectors = 'p, span, div, li, h1, h2, h3, h4, td, .l-name, .l-subject, .title-tag, .subject-sub, .closing-name, .recipient, .date-line';
+  root.querySelectorAll(selectors).forEach(el => {
+    const hasBlockChild = Array.from(el.children).some(c => ['DIV','P','UL','LI','SECTION','HEADER'].includes(c.tagName));
+    if (!hasBlockChild && el.textContent.trim()) el.setAttribute('contenteditable', 'true');
+  });
+}
+
+document.getElementById('doc-frame').addEventListener('input', () => {
+  if (!editMode) return;
+  scaleFrame(); // keep wrapper height correct while typing
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraft, 500); // keep work-in-progress if user leaves
+});
+
+/* ---- Als PDF speichern via nativem Druck ----
+   Funktioniert auf JEDEM Geraet (iPhone, Android, Desktop) ohne Bibliothek:
+   Der Browser rendert die Seite und bietet im Dialog "Als PDF speichern".
+   Wichtig (iOS): NICHT per Timer aufraeumen – das wuerde den Druckbereich
+   loeschen, waehrend die Druckvorschau noch offen ist (weisses PDF). Stattdessen
+   erst nach Schliessen des Dialogs (afterprint / Rueckkehr zur Seite). */
+let restoreTitle = '';
+let pendingRestore = false;
+let printArmed = false;
+
+function saveAsPDF() {
+  if (editMode) toggleEdit();
+
+  // saubere Kopie des Anschreibens (ohne Bearbeiten-Marker) in den Druckbereich
+  const frame = document.getElementById('doc-frame');
+  const clone = frame.cloneNode(true);
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+
+  const printArea = document.getElementById('print-area');
+  printArea.innerHTML = '';
+  Array.from(clone.childNodes).forEach(n => printArea.appendChild(n.cloneNode(true)));
+
+  // Dateiname im PDF = Dokumenttitel (Browser nutzt ihn als Vorschlag)
+  restoreTitle = document.title;
+  document.title = currentName;
+  pendingRestore = true;
+  printArmed = true;
+
+  setStatus('PDF-Dialog wird geoeffnet — "Als PDF speichern" waehlen');
+
+  // SYNCHRON drucken: erhaelt die iOS-User-Geste; der Inhalt ist bereits im DOM,
+  // der Browser baut das Druck-Layout beim Aufruf selbst auf.
+  window.print();
+}
+
+/* WICHTIG: Den Druckbereich NIEMALS hier leeren! Er bleibt off-screen liegen und
+   wird erst beim naechsten Speichern (oben) ueberschrieben. So kann eine evtl.
+   noch asynchron aufgebaute Druckvorschau (iOS) nie leer werden = kein weisses PDF.
+   Hier wird nur der Titel zurueckgesetzt und die Originalvorlage wiederhergestellt. */
+function finishSave() {
+  if (!pendingRestore) return;             // idempotent (nur einmal ausfuehren)
+  pendingRestore = false;
+  if (restoreTitle) { document.title = restoreTitle; restoreTitle = ''; }
+  afterSaved();
+}
+
+window.addEventListener('afterprint', finishSave);  // Desktop, Android, modernes Safari
+
+/* Fallback NUR bei echter Seiteninteraktion nach dem Druck (Tippen/Taste).
+   Waehrend der nativen Druckvorschau ist das unmoeglich -> es wird nie
+   mitten im Druck etwas zurueckgesetzt. */
+['pointerdown', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, () => { if (printArmed) { printArmed = false; finishSave(); } }, true)
+);
+
+/* Nach dem Speichern: Entwurf verwerfen und ORIGINAL-Vorlage wiederherstellen */
+function afterSaved() {
+  if (currentKey && LETTERS[currentKey]) {
+    clearDraft(currentKey);
+    document.getElementById('doc-frame').innerHTML = LETTERS[currentKey].body;
+    requestAnimationFrame(scaleFrame);
+    setStatus('Gespeichert — Originalvorlage wiederhergestellt');
+  }
+}
+
+/* textContent statt innerHTML: verhindert XSS ueber Datei-/Personennamen */
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+buildCards();
+</script>
+
+</body>
+</html>
