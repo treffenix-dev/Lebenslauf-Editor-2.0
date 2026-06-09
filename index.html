@@ -7,6 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1a1a1a">
 <title>Anschreiben Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -355,11 +357,11 @@ const LETTER_CSS = `
   .letter-root .l-subject { font-size: 15pt; font-weight: 500; color: var(--ink); margin-bottom: 6px; line-height: 1.3; }
   .letter-root .subject-sub { font-size: 8pt; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin-bottom: 32px; }
   .letter-root .divider { height: 0.5px; background: var(--line); margin-bottom: 28px; }
-  .letter-root .letter-text { font-size: 9.5pt; color: var(--ink-muted); line-height: 1.85; flex: 1; }
+  .letter-root .letter-text { font-size: 9.5pt; color: var(--ink-muted); line-height: 1.85; }
   .letter-root .letter-text p { margin-bottom: 16px; }
   .letter-root .letter-text p:last-child { margin-bottom: 0; }
-  .letter-root .closing { margin-top: 36px; font-size: 9.5pt; color: var(--ink-muted); line-height: 1.8; }
-  .letter-root .closing-name { font-size: 13pt; font-weight: 500; color: var(--ink); margin-top: 36px; }
+  .letter-root .closing { margin-top: 22px; font-size: 9.5pt; color: var(--ink-muted); line-height: 1.8; }
+  .letter-root .closing-name { font-size: 13pt; font-weight: 500; color: var(--ink); margin-top: 12px; }
   .letter-root .footer { padding: 0 52px 24px 56px; }
   .letter-root .footer-line { height: 0.5px; background: var(--line); margin-bottom: 14px; }
   .letter-root .footer-text { display: flex; justify-content: space-between; font-size: 7pt; color: var(--ink-faint); letter-spacing: 0.5px; }
@@ -699,35 +701,86 @@ document.getElementById('doc-frame').addEventListener('input', () => {
   draftTimer = setTimeout(saveDraft, 500); // keep work-in-progress if user leaves
 });
 
-/* ---- Als PDF speichern / Drucken via NATIVEN Druck ----
-   Bewusst KEIN html2canvas/jsPDF mehr. Gruende:
-   - Auf dem Handy lieferte die Canvas-Methode oft nur ein Bild oder einen
-     weissen Screen (CDN-/Speicher-/iOS-Eigenheiten).
-   - Der native Druck erzeugt auf JEDEM Geraet (iOS, Android, PC) ein echtes,
-     gestochen scharfes PDF: im Dialog "Als PDF speichern" waehlen, auf dem
-     iPhone ueber das Teilen-Menue "In Dateien sichern".
-   Saubere EINE A4-Seite OHNE Browser-Kopf-/Fusszeilen (URL, Datum, Uhrzeit,
-   Seitenzahl) kommt komplett aus den @media print + @page { margin:0 }-Regeln
-   oben im <style>. Hier muss nur noch der Druck ausgeloest werden. */
-function saveAsPDF() {
-  if (editMode) toggleEdit();           // Bearbeiten-Outline entfernen
-  setStatus('Druckdialog wird geoeffnet — dort "Als PDF speichern" waehlen.');
-  // kurzer Tick, damit Status/Layout ruhen, bevor der Dialog aufgeht
-  setTimeout(() => { window.print(); }, 60);
+/* ---- Als PDF speichern: PDF wird von der APP SELBST erzeugt ----
+   WICHTIG: bewusst NICHT ueber den Browser-Druck (window.print).
+   Grund: Der Browser-Druckdialog blendet auf dem Handy (v.a. Android-Chrome)
+   IMMER seine eigene Kopf-/Fusszeile ein -> URL/GitHub-Link, Datum, Uhrzeit,
+   "Seite 1 von 2". Das laesst sich per CSS NICHT zuverlaessig abschalten.
+   Deshalb wird hier das A4-Blatt mit html2canvas als Bild aufgenommen und mit
+   jsPDF in EIN exaktes A4-PDF (210x297mm, eine Seite) gelegt und heruntergeladen.
+   Ergebnis: KEIN Link, KEIN Datum/Uhrzeit, KEINE Seitenzahl, garantiert 1 Seite,
+   auf iOS, Android und PC gleich. */
+const A4_HEIGHT_PX = 1122.5; // 297mm @ 96dpi
+
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent)
+      || Math.min(screen.width, screen.height) < 820;
 }
 
-/* Vor dem Druck die Bildschirm-Verkleinerung (transform: scale) entfernen,
-   sonst druckt manche Engine das verkleinerte Vorschaubild. Die @media print-
-   Regeln erzwingen zusaetzlich die volle A4-Breite. Nach dem Druck die
-   Vorschau wieder passend einskalieren. */
-window.addEventListener('beforeprint', () => {
+function saveAsPDF() {
+  if (editMode) toggleEdit();
+
+  if (!window.html2canvas || !(window.jspdf && window.jspdf.jsPDF)) {
+    setStatus('PDF-Modul noch nicht geladen — kurz Internet pruefen und erneut tippen.');
+    return;
+  }
+
   const frame = document.getElementById('doc-frame');
-  if (frame) frame.style.transform = 'none';
-});
-window.addEventListener('afterprint', () => {
-  requestAnimationFrame(scaleFrame);
-  setStatus('Bereit');
-});
+  const sourcePage = frame.querySelector('.page') || frame;       // A4-Blatt finden
+  const scopeClass = frame.firstElementChild ? frame.firstElementChild.className : 'letter-root';
+
+  // saubere A4-Kopie ohne Bearbeiten-Marker / Skalierung
+  const clone = sourcePage.cloneNode(true);
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+  clone.style.transform = 'none';
+  clone.style.margin = '0';
+  clone.style.width = A4_WIDTH_PX + 'px';
+  clone.style.height = A4_HEIGHT_PX + 'px';
+  clone.style.boxShadow = 'none';
+  clone.style.overflow = 'hidden';
+
+  // Sichtbar (nicht off-screen) rendern -> verhindert leere/weisse Captures.
+  // Liegt nur Sekundenbruchteile ueber dem Bildschirm, mit gleichem CSS-Scope.
+  const holder = document.createElement('div');
+  holder.className = scopeClass;
+  holder.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;background:#fff;'
+    + 'width:' + A4_WIDTH_PX + 'px;height:' + A4_HEIGHT_PX + 'px;overflow:hidden;';
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+
+  setStatus('PDF wird erstellt …');
+
+  // Auf dem Handy kleinere Aufloesung -> kein Speicher-Crash / weisser Screen
+  const scale = isMobileDevice() ? 2 : 3;
+
+  const cleanup = () => { if (holder.parentNode) document.body.removeChild(holder); };
+
+  setTimeout(() => {
+    html2canvas(clone, {
+      scale: scale,
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      logging: false,
+      width: A4_WIDTH_PX,
+      height: A4_HEIGHT_PX,
+      windowWidth: A4_WIDTH_PX,
+      windowHeight: A4_HEIGHT_PX,
+      scrollX: 0,
+      scrollY: 0
+    }).then(canvas => {
+      cleanup();
+      const img = canvas.toDataURL('image/jpeg', 0.95);
+      const jsPDF = window.jspdf.jsPDF;
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+      pdf.addImage(img, 'JPEG', 0, 0, 210, 297, undefined, 'FAST'); // exakt A4 = 1 Seite
+      pdf.save(currentName + '.pdf');
+      setStatus('PDF gespeichert: ' + currentName + '.pdf');
+    }).catch(err => {
+      cleanup();
+      setStatus('Fehler beim Erstellen: ' + (err && err.message ? err.message : err));
+    });
+  }, 90);
+}
 
 /* textContent statt innerHTML: verhindert XSS ueber Datei-/Personennamen */
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
